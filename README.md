@@ -1,78 +1,61 @@
 ﻿# AI in Business: n8n + LLM + Telegram Trading Assistant
 
-Новый отдельный проект под задание из презентации.
+Проект развернут под схему из твоего скриншота n8n:
 
-## Что реализовано
+`Start Bot -> Load Market -> Parse Market -> Load News -> Parse News -> Group News -> Wait for Both -> Merge Daily Data -> Prepare Batch -> HF Sentiment -> Final Logic & Metrics -> Export CSV`
 
-- LLM-анализ новостей (`mock`, `ollama`, `huggingface`)
-- Техиндикаторы: `RSI`, `Bollinger Bands`, `SMA50`
-- Торговая логика:
-  - Strategy A: baseline (только RSI)
-  - Strategy B: LLM metrics + RSI + Bollinger
-- Метрики и логи в CSV/JSON
-- График `A vs B` за 30 дней с фоном победителя дня
-- Отправка текста + графика в Telegram
-- n8n workflow для запуска пайплайна
+## Ключевые файлы
 
-## Структура
+- `workflows/slide_style_n8n_workflow.json` - схема n8n как на слайде
+- `data/news_sample.csv` - пример новостей
+- `data/market_news.csv` - пример market+news для Python fallback
+- `src/pipeline.py` - Python fallback запуск (вне n8n)
 
-- `src/pipeline.py` - основной пайплайн
-- `src/llm_clients.py` - интеграция LLM
-- `src/indicators.py` - индикаторы
-- `src/trading_logic.py` - правила сигналов
-- `src/charting.py` - график A/B
-- `src/telegram_client.py` - Telegram API
-- `workflows/trading_assistant_workflow.json` - workflow-шаблон n8n
-- `data/market_news.csv` - пример входного датасета
-
-## Быстрый старт (через Docker + n8n)
-
-1. Подготовь переменные:
+## Запуск n8n
 
 ```powershell
 cd C:\projects\Work\work_project_1\ai_business_n8n_trading
 Copy-Item .env.example .env
+# заполни HF_API_TOKEN / TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+
+docker compose up -d
 ```
 
-2. Заполни в `.env`:
+Открыть: `http://localhost:5678`
 
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-- `LLM_MODE` (`mock`, `ollama`, `hf`)
-- если `hf`: `HF_API_TOKEN`
+Логин/пароль: `N8N_USER` / `N8N_PASSWORD` из `.env`.
 
-3. Подними n8n:
+## Импорт workflow
 
-```powershell
-docker compose up -d --build
-```
+Импортируй файл:
 
-4. Открой `http://localhost:5678`, зайди под `N8N_USER/N8N_PASSWORD` из `.env`.
+- `workflows/slide_style_n8n_workflow.json`
 
-5. Импортируй workflow:
+И запусти `Start Bot` вручную.
 
-- `workflows/trading_assistant_workflow.json`
+## Какие переменные нужны в `.env`
 
-6. Нажми `Manual Trigger` -> выполни workflow.
+- `MARKET_CSV_URL` - публичный CSV с колонками date/close
+- `NEWS_CSV_URL` - публичный CSV с колонками date/title
+- `HF_API_TOKEN` - токен Hugging Face Router
+- `HF_MODEL` - модель (по умолчанию Mistral)
+- `SYMBOL`, `TIMEFRAME`
 
-## Опционально: Ollama
+Опционально:
 
-```powershell
-docker compose --profile ollama up -d
-```
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (если добавишь в workflow ноду Telegram/HTTP sendMessage)
 
-Затем загрузи модель (например):
+## Что делает workflow
 
-```powershell
-docker compose exec ollama ollama pull llama3.1:8b
-```
+1. Грузит market CSV и news CSV.
+2. Парсит CSV в записи.
+3. Группирует новости по дате.
+4. Мержит market+news и считает RSI/Bollinger/SMA.
+5. Формирует батч-промпт и отправляет в HF Sentiment node.
+6. Считает финальные сигналы A/B и метрики.
+7. Экспортирует CSV-строку в финальной ноде.
 
-И выставь в `.env`:
-
-- `LLM_MODE=ollama`
-- `OLLAMA_URL=http://ollama:11434`
-
-## Локальный запуск без n8n
+## Быстрый Python fallback
 
 ```powershell
 python -m venv .venv
@@ -81,25 +64,6 @@ pip install -r requirements.txt
 python src\pipeline.py --llm-mode mock --send-telegram
 ```
 
-## Выходные артефакты
+## Безопасность
 
-Папка `outputs/`:
-
-- `trade_log.csv`
-- `summary.json`
-- `llm_analysis.json`
-- `telegram_message.txt`
-- `ab_30d.png`
-
-## Как это соответствует слайдам
-
-- Replace sentiment with Generative LLM: да (`ollama`/`hf`)
-- Financial Analyst prompt: да (структурированный JSON + explanation)
-- Upgrade logic with RSI/Bollinger + LLM metrics: да
-- Telegram output: да
-- A/B 30-day chart + summary: да
-
-## Важно
-
-- Никогда не публикуй токен Telegram/API ключи в Git.
-- Логика в этом шаблоне образовательная, не инвестсовет.
+Если токен Telegram был публично показан, перевыпусти его через `@BotFather` (`/revoke`).

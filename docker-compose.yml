@@ -1,8 +1,6 @@
 ﻿services:
   n8n:
-    build:
-      context: .
-      dockerfile: docker/n8n/Dockerfile
+    image: n8nio/n8n:latest
     ports:
       - "5678:5678"
     env_file:

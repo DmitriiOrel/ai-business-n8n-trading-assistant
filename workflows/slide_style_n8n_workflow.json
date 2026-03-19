@@ -1,0 +1,316 @@
+{
+  "name": "AI in Business - Slide Scheme Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start_bot",
+      "name": "Start Bot",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        120,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.MARKET_CSV_URL}}",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "load_market",
+      "name": "1. Load Market Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $json.body ?? $json.data ?? $json.response ?? $json;\nconst text = String(raw).trim();\nif (!text) return [];\n\nconst lines = text.split(/\\r?\\n/).filter(Boolean);\nconst headers = lines[0].split(',').map(h => h.trim());\nconst rows = [];\n\nconst dateIdx = headers.findIndex(h => /date|time/i.test(h));\nconst closeIdx = headers.findIndex(h => /close|price|last/i.test(h));\n\nfor (const line of lines.slice(1)) {\n  const cols = line.split(',');\n  if (dateIdx < 0 || closeIdx < 0) continue;\n  const date = (cols[dateIdx] ?? '').trim();\n  const close = Number((cols[closeIdx] ?? '').trim());\n  if (!date || Number.isNaN(close)) continue;\n  rows.push({ date, close });\n}\n\nrows.sort((a, b) => new Date(a.date) - new Date(b.date));\nreturn rows.map(r => ({ json: r }));\n"
+      },
+      "id": "parse_market",
+      "name": "Parse CSV (Market)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.NEWS_CSV_URL}}",
+        "responseFormat": "string",
+        "options": {}
+      },
+      "id": "load_news",
+      "name": "2. Load News Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $json.body ?? $json.data ?? $json.response ?? $json;\nconst text = String(raw).trim();\nif (!text) return [];\n\nconst lines = text.split(/\\r?\\n/).filter(Boolean);\nconst headers = lines[0].split(',').map(h => h.trim());\nconst rows = [];\n\nconst dateIdx = headers.findIndex(h => /date|time/i.test(h));\nconst titleIdx = headers.findIndex(h => /title|headline|news/i.test(h));\n\nfor (const line of lines.slice(1)) {\n  const cols = line.split(',');\n  if (dateIdx < 0 || titleIdx < 0) continue;\n  const date = (cols[dateIdx] ?? '').trim();\n  const title = (cols[titleIdx] ?? '').trim();\n  if (!date || !title) continue;\n  rows.push({ date, title });\n}\n\nrows.sort((a, b) => new Date(a.date) - new Date(b.date));\nreturn rows.map(r => ({ json: r }));\n"
+      },
+      "id": "parse_news",
+      "name": "Parse CSV (News)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst grouped = new Map();\nfor (const item of $input.all()) {\n  const date = item.json.date;\n  const title = item.json.title;\n  if (!date || !title) continue;\n  if (!grouped.has(date)) grouped.set(date, []);\n  grouped.get(date).push(title);\n}\n\nconst out = [];\nfor (const [date, titles] of grouped.entries()) {\n  out.push({ json: { date, news_titles: titles, news_joined: titles.join(' | ') } });\n}\nout.sort((a, b) => new Date(a.json.date) - new Date(b.json.date));\nreturn out;\n"
+      },
+      "id": "group_news",
+      "name": "Group News",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "wait_for_both",
+      "name": "Wait for Both",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        880,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction rollingMean(arr, idx, w) {\n  const from = Math.max(0, idx - w + 1);\n  const slice = arr.slice(from, idx + 1);\n  const s = slice.reduce((a, b) => a + b, 0);\n  return s / slice.length;\n}\n\nfunction rollingStd(arr, idx, w) {\n  const from = Math.max(0, idx - w + 1);\n  const slice = arr.slice(from, idx + 1);\n  const m = slice.reduce((a, b) => a + b, 0) / slice.length;\n  const v = slice.reduce((a, b) => a + (b - m) ** 2, 0) / slice.length;\n  return Math.sqrt(v);\n}\n\nfunction calcRsi(closes, idx, period = 14) {\n  if (idx === 0) return 50;\n  const from = Math.max(1, idx - period + 1);\n  let gain = 0;\n  let loss = 0;\n  for (let i = from; i <= idx; i++) {\n    const d = closes[i] - closes[i - 1];\n    if (d >= 0) gain += d;\n    else loss += -d;\n  }\n  const avgGain = gain / period;\n  const avgLoss = loss / period;\n  if (avgLoss === 0) return 100;\n  const rs = avgGain / avgLoss;\n  return 100 - (100 / (1 + rs));\n}\n\nconst all = $input.all();\nconst market = all\n  .filter(x => x.json.close !== undefined)\n  .map(x => ({ date: String(x.json.date), close: Number(x.json.close) }))\n  .filter(x => x.date && Number.isFinite(x.close))\n  .sort((a, b) => new Date(a.date) - new Date(b.date));\n\nconst newsMap = new Map();\nfor (const n of all.filter(x => x.json.news_titles !== undefined)) {\n  newsMap.set(String(n.json.date), n.json.news_titles || []);\n}\n\nconst closes = market.map(x => x.close);\nconst out = market.map((row, i) => {\n  const sma20 = rollingMean(closes, i, 20);\n  const std20 = rollingStd(closes, i, 20);\n  const bbUpper = sma20 + 2 * std20;\n  const bbLower = sma20 - 2 * std20;\n  const sma50 = rollingMean(closes, i, 50);\n  const rsi = calcRsi(closes, i, 14);\n  const newsTitles = newsMap.get(row.date) || [];\n\n  return {\n    json: {\n      date: row.date,\n      close: row.close,\n      rsi,\n      sma_50: sma50,\n      bb_upper: bbUpper,\n      bb_lower: bbLower,\n      news_titles: newsTitles,\n      news_joined: newsTitles.join(' | '),\n    },\n  };\n});\n\nreturn out;\n"
+      },
+      "id": "merge_daily",
+      "name": "3. Merge Daily Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst symbol = $env.SYMBOL || 'BTCUSDT';\nconst timeframe = $env.TIMEFRAME || '1d';\nconst model = $env.HF_MODEL || 'mistralai/Mistral-7B-Instruct-v0.3';\n\nreturn $input.all().map(item => {\n  const row = item.json;\n  const prompt = [\n    'You are a cautious financial analyst assistant.',\n    'Return strict JSON: fear_greed (0..100), sentiment_label, sentiment_score (-1..1), analysis_short.',\n    `Symbol: ${symbol}`,\n    `Timeframe: ${timeframe}`,\n    `RSI: ${Number(row.rsi).toFixed(2)}`,\n    `SMA_50: ${Number(row.sma_50).toFixed(4)}`,\n    `Price: ${Number(row.close).toFixed(4)}`,\n    `Recent News: ${row.news_joined || 'none'}`,\n  ].join('\\n');\n\n  return {\n    json: {\n      ...row,\n      symbol,\n      timeframe,\n      hf_payload: {\n        model,\n        messages: [\n          { role: 'system', content: 'You are a cautious trading assistant. Educational analysis only.' },\n          { role: 'user', content: prompt },\n        ],\n        temperature: 0.1,\n        max_tokens: 220,\n      },\n    },\n  };\n});\n"
+      },
+      "id": "prepare_batch",
+      "name": "4. Prepare Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.HF_API_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json.hf_payload}}",
+        "options": {}
+      },
+      "id": "hf_sentiment",
+      "name": "5. HF Sentiment (Single Batch)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1490,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction parseMaybeJson(text) {\n  try { return JSON.parse(text); } catch {}\n  const m = String(text || '').match(/\\{[\\s\\S]*\\}/);\n  if (!m) return null;\n  try { return JSON.parse(m[0]); } catch { return null; }\n}\n\nfunction clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }\n\nconst items = $input.all();\nconst rows = [];\n\nfor (const item of items) {\n  const row = { ...item.json };\n  let llm = null;\n\n  if (row.choices && Array.isArray(row.choices) && row.choices.length > 0) {\n    llm = parseMaybeJson(row.choices[0]?.message?.content || '');\n  } else if (row.data?.choices) {\n    llm = parseMaybeJson(row.data.choices[0]?.message?.content || '');\n  }\n\n  const sentimentScore = Number(llm?.sentiment_score ?? 0);\n  const fearGreed = Number(llm?.fear_greed ?? (50 + sentimentScore * 35));\n\n  const rsi = Number(row.rsi);\n  const close = Number(row.close);\n  const bbUpper = Number(row.bb_upper);\n  const bbLower = Number(row.bb_lower);\n\n  const signalA = rsi >= 70 ? 'SELL' : rsi <= 30 ? 'BUY' : 'HOLD';\n\n  let signalB = 'HOLD';\n  if (fearGreed >= 80 && rsi >= 70 && close >= bbUpper) signalB = 'SELL';\n  else if (fearGreed <= 20 && rsi <= 30 && close <= bbLower) signalB = 'BUY';\n  else if (fearGreed >= 60 && sentimentScore >= 0.2 && rsi >= 25) signalB = 'SELL';\n  else if (fearGreed <= 40 && sentimentScore <= -0.2 && rsi <= 55) signalB = 'BUY';\n  else if (sentimentScore >= 0.25 && rsi <= 45) signalB = 'BUY';\n  else if (sentimentScore <= -0.25 && rsi >= 55) signalB = 'SELL';\n\n  rows.push({\n    date: row.date,\n    close,\n    rsi,\n    bb_lower: bbLower,\n    bb_upper: bbUpper,\n    fear_greed: clamp(fearGreed, 0, 100),\n    sentiment_score: clamp(sentimentScore, -1, 1),\n    signal_a: signalA,\n    signal_b: signalB,\n  });\n}\n\nrows.sort((a, b) => new Date(a.date) - new Date(b.date));\n\nlet posA = 0;\nlet posB = 0;\nlet prevClose = null;\nlet cumA = 0;\nlet cumB = 0;\n\nconst out = [];\nfor (const r of rows) {\n  if (r.signal_a === 'BUY') posA = 1;\n  if (r.signal_a === 'SELL') posA = -1;\n  if (r.signal_b === 'BUY') posB = 1;\n  if (r.signal_b === 'SELL') posB = -1;\n\n  const ret = prevClose ? (r.close - prevClose) / prevClose : 0;\n  const dailyA = (prevClose ? posA : 0) * ret;\n  const dailyB = (prevClose ? posB : 0) * ret;\n  cumA = (1 + cumA) * (1 + dailyA) - 1;\n  cumB = (1 + cumB) * (1 + dailyB) - 1;\n\n  out.push({\n    json: {\n      ...r,\n      pos_a: posA,\n      pos_b: posB,\n      daily_a: dailyA,\n      daily_b: dailyB,\n      cum_a: cumA,\n      cum_b: cumB,\n    },\n  });\n\n  prevClose = r.close;\n}\n\nreturn out;\n"
+      },
+      "id": "final_logic",
+      "name": "6. Final Logic & Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1710,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rows = $input.all().map(i => i.json);\nif (!rows.length) {\n  return [{ json: { csv: '', rows: 0 } }];\n}\n\nconst headers = [\n  'date','close','rsi','bb_lower','bb_upper','fear_greed','sentiment_score',\n  'signal_a','signal_b','pos_a','pos_b','daily_a','daily_b','cum_a','cum_b'\n];\n\nconst escapeCsv = (v) => {\n  const s = String(v ?? '');\n  if (/[\",\\n]/.test(s)) return '\"' + s.replace(/\"/g, '\"\"') + '\"';\n  return s;\n};\n\nconst lines = [headers.join(',')];\nfor (const r of rows) {\n  lines.push(headers.map(h => escapeCsv(r[h])).join(','));\n}\n\nconst csv = lines.join('\\n');\nreturn [{\n  json: {\n    rows: rows.length,\n    latest_signal_a: rows[rows.length - 1].signal_a,\n    latest_signal_b: rows[rows.length - 1].signal_b,\n    csv,\n  },\n}];\n"
+      },
+      "id": "export_csv",
+      "name": "7. Export CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Start Bot": {
+      "main": [
+        [
+          {
+            "node": "1. Load Market Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "2. Load News Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Load Market Data": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV (Market)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV (Market)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Both",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Load News Data": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV (News)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV (News)": {
+      "main": [
+        [
+          {
+            "node": "Group News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group News": {
+      "main": [
+        [
+          {
+            "node": "Wait for Both",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Wait for Both": {
+      "main": [
+        [
+          {
+            "node": "3. Merge Daily Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Merge Daily Data": {
+      "main": [
+        [
+          {
+            "node": "4. Prepare Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Prepare Batch": {
+      "main": [
+        [
+          {
+            "node": "5. HF Sentiment (Single Batch)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. HF Sentiment (Single Batch)": {
+      "main": [
+        [
+          {
+            "node": "6. Final Logic & Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Final Logic & Metrics": {
+      "main": [
+        [
+          {
+            "node": "7. Export CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {},
+  "versionId": "1",
+  "id": "a4f51f07-5f5b-4b1a-aec7-9fc0d584a8d1"
+}
