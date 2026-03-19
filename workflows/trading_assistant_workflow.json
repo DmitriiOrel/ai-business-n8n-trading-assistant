@@ -1,0 +1,40 @@
+﻿{
+  "name": "AI in Business Trading Assistant",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual_trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [280, 260]
+    },
+    {
+      "parameters": {
+        "command": "python3 /files/src/pipeline.py --input-csv /files/data/market_news.csv --out-dir /files/outputs --symbol {{$env.SYMBOL}} --timeframe {{$env.TIMEFRAME}} --llm-mode {{$env.LLM_MODE}} --send-telegram"
+      },
+      "id": "run_pipeline",
+      "name": "Run Python Pipeline",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [560, 260]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Python Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {},
+  "versionId": "1"
+}
