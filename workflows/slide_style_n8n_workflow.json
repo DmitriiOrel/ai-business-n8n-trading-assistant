@@ -125,13 +125,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://router.huggingface.co/v1/chat/completions",
+        "url": "={{$env.HF_API_TOKEN ? 'https://router.huggingface.co/v1/chat/completions' : 'https://postman-echo.com/post'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "=Bearer {{$env.HF_API_TOKEN}}"
+              "value": "={{$env.HF_API_TOKEN ? ('Bearer ' + $env.HF_API_TOKEN) : ''}}"
             },
             {
               "name": "Content-Type",
@@ -176,6 +176,37 @@
       "typeVersion": 2,
       "position": [
         1920,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $json;\nconst text = [\n  '?? n8n run completed',\n  `Rows: ${r.rows ?? 0}`,\n  `Latest A: ${r.latest_signal_a ?? 'n/a'}`,\n  `Latest B: ${r.latest_signal_b ?? 'n/a'}`,\n  '',\n  'First CSV lines:',\n  String(r.csv || '').split('\\n').slice(0, 6).join('\\n')\n].join('\\n');\nreturn [{ json: { ...r, telegram_text: text } }];"
+      },
+      "id": "build_telegram_message",
+      "name": "8. Build Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2120,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.TELEGRAM_BOT_TOKEN ? ('https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage') : 'https://postman-echo.com/post'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { chat_id: $env.TELEGRAM_CHAT_ID, text: $json.telegram_text } }}",
+        "options": {}
+      },
+      "id": "telegram_send_message",
+      "name": "9. Telegram Send Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
         220
       ]
     }
@@ -301,6 +332,28 @@
         [
           {
             "node": "7. Export CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Export CSV": {
+      "main": [
+        [
+          {
+            "node": "8. Build Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8. Build Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "9. Telegram Send Message",
             "type": "main",
             "index": 0
           }
