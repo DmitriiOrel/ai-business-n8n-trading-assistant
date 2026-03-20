@@ -1,69 +1,83 @@
-﻿# AI in Business: n8n + LLM + Telegram Trading Assistant
+﻿# Team 13 - Crypto Trading Strategy (n8n)
 
-Проект развернут под схему из твоего скриншота n8n:
+## 👥 Members
+- Dmitrii Orel - 45
 
-`Start Bot -> Load Market -> Parse Market -> Load News -> Parse News -> Group News -> Wait for Both -> Merge Daily Data -> Prepare Batch -> HF Sentiment -> Final Logic & Metrics -> Export CSV`
+## 🧠 Strategy Overview
 
-## Ключевые файлы
+### Core Logic
+This project implements a **hybrid scoring strategy** in `n8n`:
 
-- `workflows/slide_style_n8n_workflow.json` - схема n8n как на слайде
-- `data/news_sample.csv` - пример новостей
-- `data/market_news.csv` - пример market+news для Python fallback
-- `src/pipeline.py` - Python fallback запуск (вне n8n)
+- market features (price, RSI, Bollinger bands),
+- news aggregation by day,
+- Hugging Face sentiment extraction,
+- rule-based decision engine for `Strategy A` (baseline) and `Strategy B` (LLM + TA),
+- export of `trade_log.csv` and `metrics.csv`.
 
-## Запуск n8n
+**Key principles:**
+- **Data fusion:** market CSV + news CSV are merged by date.
+- **LLM-enhanced signal:** sentiment score and fear/greed proxy are combined with RSI and Bollinger levels.
+- **Two-strategy comparison:** baseline vs enhanced strategy is tracked daily.
+- **Automated reporting:** metrics + trade log are generated in workflow and can be sent to Telegram.
+
+### Decision Flowchart (Mermaid)
+```mermaid
+graph TD
+    Start[Start Bot] --> M1[1. Load Market Data]
+    Start --> N1[2. Load News Data]
+
+    M1 --> M2[Parse CSV Market]
+    N1 --> N2[Parse CSV News]
+    N2 --> N3[Group News]
+
+    M2 --> W[Wait for Both]
+    N3 --> W
+
+    W --> D[3. Merge Daily Data]
+    D --> B[4. Prepare Batch]
+    B --> HF[5. HF Sentiment]
+    HF --> L[6. Final Logic and Metrics]
+    L --> E[7. Export CSV]
+    E --> T1[8. Build Telegram Message]
+    T1 --> T2[9. Telegram Send Message]
+```
+
+### Performance Analysis
+Current run snapshot (`metrics.csv`):
+
+- **Sharpe Ratio:** **8.88**
+- **Total Return:** **4.84%**
+- **Max Drawdown:** **-1.39%**
+
+**Strengths:**
+- End-to-end reproducible `n8n` pipeline.
+- Clean separation of data ingestion, LLM inference, and execution logic.
+- Fast artifact generation (`trade_log.csv`, `metrics.csv`, workflow-level Telegram alert).
+
+**Limitations & Learnings:**
+- Quality depends on external CSV quality and consistency.
+- HF sentiment response format may vary between models.
+- Current dataset is short; robust validation needs longer history.
+
+## 📁 Repository Contents
+
+- **README.md** ← Strategy documentation
+- **workflow.json** ← main n8n workflow (reference-style root file)
+- **trade_log.csv** ← run log exported for reporting
+- **metrics.csv** ← performance summary exported for reporting
+- **workflows/slide_style_n8n_workflow.json** ← editable workflow source
+- **src/** ← Python fallback pipeline for local testing
+- **data/** ← sample market/news datasets
+- **docker-compose.yml** ← n8n local deployment
+
+## 🚀 Run n8n
 
 ```powershell
 cd C:\projects\Work\work_project_1\ai_business_n8n_trading
 Copy-Item .env.example .env
-# заполни HF_API_TOKEN / TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+# set HF_API_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 docker compose up -d
 ```
 
-Открыть: `http://localhost:5678`
-
-Логин/пароль: `N8N_USER` / `N8N_PASSWORD` из `.env`.
-
-## Импорт workflow
-
-Импортируй файл:
-
-- `workflows/slide_style_n8n_workflow.json`
-
-И запусти `Start Bot` вручную.
-
-## Какие переменные нужны в `.env`
-
-- `MARKET_CSV_URL` - публичный CSV с колонками date/close
-- `NEWS_CSV_URL` - публичный CSV с колонками date/title
-- `HF_API_TOKEN` - токен Hugging Face Router
-- `HF_MODEL` - модель (по умолчанию Mistral)
-- `SYMBOL`, `TIMEFRAME`
-
-Опционально:
-
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (если добавишь в workflow ноду Telegram/HTTP sendMessage)
-
-## Что делает workflow
-
-1. Грузит market CSV и news CSV.
-2. Парсит CSV в записи.
-3. Группирует новости по дате.
-4. Мержит market+news и считает RSI/Bollinger/SMA.
-5. Формирует батч-промпт и отправляет в HF Sentiment node.
-6. Считает финальные сигналы A/B и метрики.
-7. Экспортирует CSV-строку в финальной ноде.
-
-## Быстрый Python fallback
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python src\pipeline.py --llm-mode mock --send-telegram
-```
-
-## Безопасность
-
-Если токен Telegram был публично показан, перевыпусти его через `@BotFather` (`/revoke`).
+Open `http://localhost:5678`, import `workflow.json`, run `Start Bot`.
